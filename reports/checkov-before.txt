@@ -1,0 +1,124 @@
+terraform scan results:
+
+Passed checks: 11, Failed checks: 30, Skipped checks: 0
+
+Check: CKV_AWS_53: "Ensure S3 bucket has block public ACLS enabled"
+	FAILED for resource: aws_s3_bucket_public_access_block.public_data
+	File: \main.tf:53-60
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/bc-aws-s3-19
+[0mCheck: CKV_AWS_54: "Ensure S3 bucket has block public policy enabled"
+	FAILED for resource: aws_s3_bucket_public_access_block.public_data
+	File: \main.tf:53-60
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/bc-aws-s3-20
+[0mCheck: CKV_AWS_55: "Ensure S3 bucket has ignore public ACLs enabled"
+	FAILED for resource: aws_s3_bucket_public_access_block.public_data
+	File: \main.tf:53-60
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/bc-aws-s3-21
+[0mCheck: CKV_AWS_56: "Ensure S3 bucket has 'restrict_public_buckets' enabled"
+	FAILED for resource: aws_s3_bucket_public_access_block.public_data
+	File: \main.tf:53-60
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/bc-aws-s3-22
+[0mCheck: CKV_AWS_70: "Ensure S3 bucket does not allow an action with any Principal"
+	FAILED for resource: aws_s3_bucket_policy.public_read
+	File: \main.tf:63-78
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/bc-aws-s3-23
+[0mCheck: CKV_AWS_273: "Ensure access is controlled through SSO and not AWS IAM defined users"
+	FAILED for resource: aws_iam_user.overprivileged
+	File: \main.tf:85-87
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-273
+[0mCheck: CKV_AWS_62: "Ensure IAM policies that allow full "*-*" administrative privileges are not created"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-iam-45
+[0mCheck: CKV_AWS_287: "Ensure IAM policies does not allow credentials exposure"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-287
+[0mCheck: CKV_AWS_288: "Ensure IAM policies does not allow data exfiltration"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-288
+[0mCheck: CKV_AWS_289: "Ensure IAM policies does not allow permissions management / resource exposure without constraints"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-289
+[0mCheck: CKV_AWS_40: "Ensure IAM policies are attached only to groups or roles (Reducing access management complexity may in-turn reduce opportunity for a principal to inadvertently receive or retain excessive privileges.)"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/iam-16-iam-policy-privileges-1
+[0mCheck: CKV_AWS_286: "Ensure IAM policies does not allow privilege escalation"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-286
+[0mCheck: CKV_AWS_63: "Ensure no IAM policies documents allow "*" as a statement's actions"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/iam-48
+[0mCheck: CKV_AWS_355: "Ensure no IAM policies documents allow "*" as a statement's resource for restrictable actions"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-355
+[0mCheck: CKV_AWS_290: "Ensure IAM policies does not allow write access without constraints"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-290
+[0mCheck: CKV_AWS_382: "Ensure no security groups allow egress from 0.0.0.0:0 to port -1"
+	FAILED for resource: aws_security_group.wide_open
+	File: \main.tf:113-141
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-networking-policies/bc-aws-382
+[0mCheck: CKV_AWS_24: "Ensure no security groups allow ingress from 0.0.0.0:0 to port 22"
+	FAILED for resource: aws_security_group.wide_open
+	File: \main.tf:113-141
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-networking-policies/networking-1-port-security
+[0mCheck: CKV_AWS_25: "Ensure no security groups allow ingress from 0.0.0.0:0 to port 3389"
+	FAILED for resource: aws_security_group.wide_open
+	File: \main.tf:113-141
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-networking-policies/networking-2
+[0mCheck: CKV_AWS_3: "Ensure all data stored in the EBS is securely encrypted"
+	FAILED for resource: aws_ebs_volume.unencrypted
+	File: \main.tf:153-162
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/general-3-encrypt-ebs-volume
+[0mCheck: CKV_AWS_189: "Ensure EBS Volume is encrypted by KMS using a customer managed Key (CMK)"
+	FAILED for resource: aws_ebs_volume.unencrypted
+	File: \main.tf:153-162
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/bc-aws-general-109
+[0mCheck: CKV_AWS_394: "Ensure aws_availability_zones data source pins zone identity so its result set does not silently expand when AWS adds an Availability Zone"
+	FAILED for resource: aws_availability_zones.available
+	File: \main.tf:149-151
+Check: CKV2_AWS_62: "Ensure S3 buckets should have event notifications enabled"
+	FAILED for resource: aws_s3_bucket.public_data
+	File: \main.tf:47-49
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-62
+[0mCheck: CKV2_AWS_61: "Ensure that an S3 bucket has a lifecycle configuration"
+	FAILED for resource: aws_s3_bucket.public_data
+	File: \main.tf:47-49
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-logging-policies/bc-aws-2-61
+[0mCheck: CKV_AWS_18: "Ensure the S3 bucket has access logging enabled"
+	FAILED for resource: aws_s3_bucket.public_data
+	File: \main.tf:47-49
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-13-enable-logging
+[0mCheck: CKV2_AWS_5: "Ensure that Security Groups are attached to another resource"
+	FAILED for resource: aws_security_group.wide_open
+	File: \main.tf:113-141
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-networking-policies/ensure-that-security-groups-are-attached-to-ec2-instances-or-elastic-network-interfaces-enis
+[0mCheck: CKV_AWS_144: "Ensure that S3 bucket has cross-region replication enabled"
+	FAILED for resource: aws_s3_bucket.public_data
+	File: \main.tf:47-49
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-s3-bucket-has-cross-region-replication-enabled
+[0mCheck: CKV_AWS_21: "Ensure all data stored in the S3 bucket have versioning enabled"
+	FAILED for resource: aws_s3_bucket.public_data
+	File: \main.tf:47-49
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/s3-policies/s3-16-enable-versioning
+[0mCheck: CKV_AWS_145: "Ensure that S3 buckets are encrypted with KMS by default"
+	FAILED for resource: aws_s3_bucket.public_data
+	File: \main.tf:47-49
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-general-policies/ensure-that-s3-buckets-are-encrypted-with-kms-by-default
+[0mCheck: CKV2_AWS_40: "Ensure AWS IAM policy does not allow full IAM privileges"
+	FAILED for resource: aws_iam_user_policy.admin_wildcard
+	File: \main.tf:90-102
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-iam-policies/bc-aws-2-40
+[0mCheck: CKV2_AWS_6: "Ensure that S3 bucket has a Public Access block"
+	FAILED for resource: aws_s3_bucket.public_data
+	File: \main.tf:47-49
+	Guide: [1mhttps://docs.prismacloud.io/en/enterprise-edition/policy-reference/aws-policies/aws-networking-policies/s3-bucket-should-have-public-access-blocks-defaults-to-false-if-the-public-access-block-is-not-attached
+[0m
