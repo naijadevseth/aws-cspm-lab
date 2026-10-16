@@ -146,6 +146,36 @@ resource "aws_default_security_group" "default" {
   vpc_id = data.aws_vpc.default.id
 }
 
+# ---------------------------------------------------------------------
+# Round 2 fixes: findings that only appeared in the full after-scan
+# ---------------------------------------------------------------------
+
+# FIX: ec2_ebs_snapshot_account_block_public_access (High)
+# Stops anyone in this account from sharing an EBS snapshot publicly,
+# a known way disk contents leak.
+resource "aws_ebs_snapshot_block_public_access" "this" {
+  state = "block-all-sharing"
+}
+
+# FIX: ec2_instance_account_imdsv2_enabled (High)
+# New EC2 instances must use IMDSv2 (session tokens) for the metadata
+# service. IMDSv1 was abused in the 2019 Capital One breach via SSRF.
+resource "aws_ec2_instance_metadata_defaults" "this" {
+  http_tokens                 = "required"
+  http_put_response_hop_limit = 2
+}
+
+# FIX: vpc_subnet_no_public_ip_by_default (High x3)
+# Default subnets hand every new instance a public IP automatically.
+# Turning that off means a server is only internet-facing if someone
+# deliberately asks for it.
+resource "aws_default_subnet" "default" {
+  for_each = toset(data.aws_availability_zones.available.names)
+
+  availability_zone       = each.value
+  map_public_ip_on_launch = false
+}
+
 # =====================================================================
 # MISCONFIG 1 FIXED: S3 bucket is now private
 # (Name kept so the plan shows an in-place fix rather than a new bucket.)
@@ -375,12 +405,21 @@ resource "aws_cloudwatch_log_group" "trail" {
 resource "aws_iam_role" "trail_to_cloudwatch" {
   name = "cspm-lab-cloudtrail-to-cloudwatch"
 
+  # Round 2 fix: iam_role_cross_service_confused_deputy_prevention (High).
+  # Without these conditions, CloudTrail acting for ANY account could be
+  # tricked into using this role. Now only OUR trail in OUR account can.
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
       Effect    = "Allow"
       Principal = { Service = "cloudtrail.amazonaws.com" }
       Action    = "sts:AssumeRole"
+      Condition = {
+        StringEquals = {
+          "aws:SourceAccount" = local.account_id
+          "aws:SourceArn"     = local.trail_arn
+        }
+      }
     }]
   })
 }
@@ -455,7 +494,9 @@ locals {
     "network-gateway-changes"  = "{ ($.eventName = CreateCustomerGateway) || ($.eventName = DeleteCustomerGateway) || ($.eventName = AttachInternetGateway) || ($.eventName = CreateInternetGateway) || ($.eventName = DeleteInternetGateway) || ($.eventName = DetachInternetGateway) }"
     "route-table-changes"      = "{ ($.eventSource = ec2.amazonaws.com) && (($.eventName = CreateRoute) || ($.eventName = CreateRouteTable) || ($.eventName = ReplaceRoute) || ($.eventName = ReplaceRouteTableAssociation) || ($.eventName = DeleteRouteTable) || ($.eventName = DeleteRoute) || ($.eventName = DisassociateRouteTable)) }"
     "vpc-changes"              = "{ ($.eventName = CreateVpc) || ($.eventName = DeleteVpc) || ($.eventName = ModifyVpcAttribute) || ($.eventName = AcceptVpcPeeringConnection) || ($.eventName = CreateVpcPeeringConnection) || ($.eventName = DeleteVpcPeeringConnection) || ($.eventName = RejectVpcPeeringConnection) || ($.eventName = AttachClassicLinkVpc) || ($.eventName = DetachClassicLinkVpc) || ($.eventName = DisableVpcClassicLink) || ($.eventName = EnableVpcClassicLink) }"
-    "organizations-changes"    = "{ ($.eventSource = organizations.amazonaws.com) && (($.eventName = AcceptHandshake) || ($.eventName = AttachPolicy) || ($.eventName = CreateAccount) || ($.eventName = CreateOrganizationalUnit) || ($.eventName = CreatePolicy) || ($.eventName = DeclineHandshake) || ($.eventName = DeleteOrganization) || ($.eventName = DeleteOrganizationalUnit) || ($.eventName = DeletePolicy) || ($.eventName = DetachPolicy) || ($.eventName = DisablePolicyType) || ($.eventName = EnablePolicyType) || ($.eventName = InviteAccountToOrganization) || ($.eventName = LeaveOrganization) || ($.eventName = MoveAccount) || ($.eventName = RemoveAccountFromOrganization) || ($.eventName = UpdatePolicy) || ($.eventName = UpdateOrganizationalUnit)) }"
+    # Round 2 fix: added CancelHandshake, CreateOrganization, EnableAllFeatures.
+    # Prowler requires ALL 21 Organizations events; the first version had 18.
+    "organizations-changes" = "{ ($.eventSource = organizations.amazonaws.com) && (($.eventName = AcceptHandshake) || ($.eventName = AttachPolicy) || ($.eventName = CancelHandshake) || ($.eventName = CreateAccount) || ($.eventName = CreateOrganization) || ($.eventName = CreateOrganizationalUnit) || ($.eventName = CreatePolicy) || ($.eventName = DeclineHandshake) || ($.eventName = DeleteOrganization) || ($.eventName = DeleteOrganizationalUnit) || ($.eventName = DeletePolicy) || ($.eventName = DetachPolicy) || ($.eventName = DisablePolicyType) || ($.eventName = EnableAllFeatures) || ($.eventName = EnablePolicyType) || ($.eventName = InviteAccountToOrganization) || ($.eventName = LeaveOrganization) || ($.eventName = MoveAccount) || ($.eventName = RemoveAccountFromOrganization) || ($.eventName = UpdatePolicy) || ($.eventName = UpdateOrganizationalUnit)) }"
   }
 }
 
