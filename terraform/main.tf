@@ -1,11 +1,12 @@
 # =====================================================================
-# aws-cspm-lab: INTENTIONALLY INSECURE LAB ENVIRONMENT
+# aws-cspm-lab: REMEDIATED (SECURE) VERSION
 #
-# Every resource below contains a deliberate misconfiguration so that
-# Checkov (code scanning) and Prowler (live account scanning) have real
-# findings to detect, triage and remediate.
+# This replaces the intentionally insecure lab. Each "FIX" comment maps
+# back to a finding in CHECKOV-TRIAGE.md / PROWLER-TRIAGE.md.
+# Accepted risks are suppressed IN CODE with a written reason
+# using Checkov skip comments, so nothing is silently ignored.
 #
-# DO NOT reuse this code for anything real. Lab account only.
+# Compare with the insecure version:  git diff HEAD -- terraform/main.tf
 # =====================================================================
 
 terraform {
@@ -33,103 +34,209 @@ variable "region" {
   default     = "eu-north-1"
 }
 
-# S3 bucket names must be unique across ALL AWS accounts worldwide,
-# so a random suffix avoids name collisions.
+# Personal data lives in terraform.tfvars, which .gitignore keeps
+# out of GitHub. See terraform.tfvars.example.
+variable "alert_email" {
+  description = "Email address that receives security alarm notifications"
+  type        = string
+}
+
+data "aws_caller_identity" "current" {}
+
+locals {
+  account_id = data.aws_caller_identity.current.account_id
+  trail_name = "cspm-lab-trail"
+  trail_arn  = "arn:aws:cloudtrail:${var.region}:${local.account_id}:trail/${local.trail_name}"
+}
+
 resource "random_id" "suffix" {
   byte_length = 4
 }
 
-# ---------------------------------------------------------------------
-# MISCONFIG 1: Publicly readable S3 bucket
-# Real-world risk: the #1 source of cloud data leaks. Anyone on the
-# internet can read every object in the bucket.
-# ---------------------------------------------------------------------
-resource "aws_s3_bucket" "public_data" {
-  bucket = "cspm-lab-public-${random_id.suffix.hex}"
+# =====================================================================
+# ACCOUNT-LEVEL BASELINE (Prowler-only findings: never in the old code)
+# =====================================================================
+
+# FIX: s3_account_level_public_access_blocks (High)
+# A safety net for EVERY bucket in the account, including future ones.
+resource "aws_s3_account_public_access_block" "account" {
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
-# Turns OFF the four safety switches that normally stop a bucket
-# from being made public.
+# FIX: ec2_ebs_default_encryption (High)
+# Every new EBS volume in this region is encrypted automatically.
+resource "aws_ebs_encryption_by_default" "this" {
+  enabled = true
+}
+
+# FIX: iam_password_policy_* (7 findings)
+resource "aws_iam_account_password_policy" "strict" {
+  minimum_password_length        = 14
+  require_lowercase_characters   = true
+  require_uppercase_characters   = true
+  require_numbers                = true
+  require_symbols                = true
+  password_reuse_prevention      = 24
+  max_password_age               = 90
+  allow_users_to_change_password = true
+}
+
+# FIX: accessanalyzer_enabled (Low)
+# Free. Continuously flags resources shared outside the account.
+resource "aws_accessanalyzer_analyzer" "account" {
+  analyzer_name = "cspm-lab-analyzer"
+  type          = "ACCOUNT"
+}
+
+# FIX: ec2_networkacl_allow_ingress_* (1 High, 2 Medium)
+# The default VPC's network ACL allowed ALL inbound traffic from the
+# internet (AWS default). Restrict inbound to traffic from inside the
+# VPC. Trade-off: NACLs are stateless, so an instance in this VPC could
+# no longer receive replies from the internet. Acceptable here because
+# nothing runs in the default VPC.
+data "aws_vpc" "default" {
+  default = true
+}
+
+data "aws_network_acls" "default" {
+  vpc_id = data.aws_vpc.default.id
+
+  filter {
+    name   = "default"
+    values = ["true"]
+  }
+}
+
+resource "aws_default_network_acl" "default" {
+  default_network_acl_id = tolist(data.aws_network_acls.default.ids)[0]
+
+  ingress {
+    rule_no    = 100
+    action     = "allow"
+    protocol   = "-1"
+    from_port  = 0
+    to_port    = 0
+    cidr_block = data.aws_vpc.default.cidr_block
+  }
+
+  egress {
+    rule_no    = 100
+    action     = "allow"
+    protocol   = "-1"
+    from_port  = 0
+    to_port    = 0
+    cidr_block = "0.0.0.0/0"
+  }
+
+  lifecycle {
+    ignore_changes = [subnet_ids]
+  }
+}
+
+# FIX: ec2_securitygroup_default_restrict_traffic (High, CIS 5.4)
+# Only visible with --scan-unused-services. Every VPC has a "default"
+# security group that AWS attaches automatically when you launch something
+# without choosing a group. Out of the box it allows all traffic between
+# members and all outbound traffic. Declaring it with NO rules strips them,
+# so nothing can accidentally inherit permissive access.
+resource "aws_default_security_group" "default" {
+  vpc_id = data.aws_vpc.default.id
+}
+
+# =====================================================================
+# MISCONFIG 1 FIXED: S3 bucket is now private
+# (Name kept so the plan shows an in-place fix rather than a new bucket.)
+# =====================================================================
+resource "aws_s3_bucket" "public_data" {
+  #checkov:skip=CKV_AWS_144:Cross-region replication is a DR control; not justified for an empty lab bucket
+  #checkov:skip=CKV2_AWS_61:Lifecycle rules are cost/retention management, not a security control here
+  #checkov:skip=CKV2_AWS_62:Event notifications out of scope for this lab
+  #checkov:skip=CKV_AWS_145:SSE-S3 (AES256) is sufficient; customer-managed KMS adds cost without lab benefit
+  bucket        = "cspm-lab-public-${random_id.suffix.hex}"
+  force_destroy = true
+}
+
+# FIX: CKV_AWS_53/54/55/56, CKV2_AWS_6, s3_bucket_level_public_access_block
 resource "aws_s3_bucket_public_access_block" "public_data" {
   bucket = aws_s3_bucket.public_data.id
 
-  block_public_acls       = false
-  block_public_policy     = false
-  ignore_public_acls      = false
-  restrict_public_buckets = false
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
 }
 
-# Grants read access to "*" = everyone, unauthenticated.
+# FIX: CKV_AWS_70, s3_bucket_public_access, s3_bucket_cross_account_access
+# The "Principal: *" ALLOW is gone. The only statement left DENIES
+# any request not made over HTTPS (fixes s3_bucket_secure_transport_policy).
 resource "aws_s3_bucket_policy" "public_read" {
   bucket = aws_s3_bucket.public_data.id
 
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [{
-      Sid       = "PublicRead"
-      Effect    = "Allow"
+      Sid       = "DenyInsecureTransport"
+      Effect    = "Deny"
       Principal = "*"
-      Action    = "s3:GetObject"
-      Resource  = "${aws_s3_bucket.public_data.arn}/*"
+      Action    = "s3:*"
+      Resource = [
+        aws_s3_bucket.public_data.arn,
+        "${aws_s3_bucket.public_data.arn}/*"
+      ]
+      Condition = { Bool = { "aws:SecureTransport" = "false" } }
     }]
   })
 
   depends_on = [aws_s3_bucket_public_access_block.public_data]
 }
 
-# ---------------------------------------------------------------------
-# MISCONFIG 2: Over-privileged IAM user
-# Real-world risk: violates least privilege. If this user's credentials
-# leak, the attacker gets full control of the entire account.
-# ---------------------------------------------------------------------
-resource "aws_iam_user" "overprivileged" {
-  name = "lab-overprivileged-user"
+# FIX: CKV_AWS_21, s3_bucket_object_versioning
+resource "aws_s3_bucket_versioning" "public_data" {
+  bucket = aws_s3_bucket.public_data.id
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
 
-# Inline policy allowing every action ("*") on every resource ("*").
-resource "aws_iam_user_policy" "admin_wildcard" {
-  name = "allow-everything"
-  user = aws_iam_user.overprivileged.name
-
-  policy = jsonencode({
-    Version = "2012-10-17"
-    Statement = [{
-      Effect   = "Allow"
-      Action   = "*"
-      Resource = "*"
-    }]
-  })
+# Explicit (AWS already does this by default, but code should say so)
+resource "aws_s3_bucket_server_side_encryption_configuration" "public_data" {
+  bucket = aws_s3_bucket.public_data.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
 }
 
-# ---------------------------------------------------------------------
-# MISCONFIG 3: Security group open to the whole internet
-# Real-world risk: SSH (22) and RDP (3389) exposed to 0.0.0.0/0 are
-# constantly scanned and brute-forced by bots within minutes.
-# ---------------------------------------------------------------------
-data "aws_vpc" "default" {
-  default = true
+# FIX: CKV_AWS_18, s3_bucket_server_access_logging_enabled
+resource "aws_s3_bucket_logging" "public_data" {
+  bucket        = aws_s3_bucket.public_data.id
+  target_bucket = aws_s3_bucket.logs.id
+  target_prefix = "s3-access/data/"
 }
 
+# =====================================================================
+# MISCONFIG 2 FIXED: overprivileged IAM user removed
+# lab-overprivileged-user and its "*:*" inline policy are deleted simply
+# by no longer being in the code. Terraform destroys them on apply.
+# =====================================================================
+
+# =====================================================================
+# MISCONFIG 3 FIXED: no admin ports open to the internet
+# =====================================================================
 resource "aws_security_group" "wide_open" {
+  #checkov:skip=CKV2_AWS_5:Lab artifact kept to show the in-place fix; it is not attached to anything
+  #checkov:skip=CKV_AWS_382:Egress to 0.0.0.0/0 is the AWS default and the group has no attached resources
   name        = "lab-wide-open-sg"
-  description = "Intentionally insecure: admin ports open to the internet"
+  description = "Remediated: no inbound rules"
   vpc_id      = data.aws_vpc.default.id
 
-  ingress {
-    description = "SSH from anywhere"
-    from_port   = 22
-    to_port     = 22
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
-
-  ingress {
-    description = "RDP from anywhere"
-    from_port   = 3389
-    to_port     = 3389
-    protocol    = "tcp"
-    cidr_blocks = ["0.0.0.0/0"]
-  }
+  # "ingress = []" is required. Simply deleting the ingress blocks would
+  # NOT remove the existing rules (Terraform attributes-as-blocks rule).
+  ingress = []
 
   egress {
     description = "All outbound traffic"
@@ -140,30 +247,244 @@ resource "aws_security_group" "wide_open" {
   }
 }
 
-# ---------------------------------------------------------------------
-# MISCONFIG 4: Unencrypted EBS volume
-# Real-world risk: data at rest is readable if a snapshot or the
-# volume is copied or shared. Also fails compliance requirements.
-# Kept at 1 GB to keep cost negligible.
-# ---------------------------------------------------------------------
+# =====================================================================
+# MISCONFIG 4 FIXED: EBS volume is encrypted
+# Encryption cannot be switched on for an existing volume, so Terraform
+# will REPLACE it (destroy old, create new). Watch for "-/+" in the plan.
+# =====================================================================
 data "aws_availability_zones" "available" {
+  #checkov:skip=CKV_AWS_394:AZ pinning is a reliability concern, not a security control
   state = "available"
 }
 
 resource "aws_ebs_volume" "unencrypted" {
+  #checkov:skip=CKV_AWS_189:Encrypted with the AWS-managed EBS key; a customer-managed key adds cost without lab benefit
   availability_zone = data.aws_availability_zones.available.names[0]
   size              = 1
   type              = "gp3"
-  encrypted         = false
+  encrypted         = true
 
   tags = {
-    Name = "lab-unencrypted-volume"
+    Name = "lab-encrypted-volume"
   }
 }
 
-# ---------------------------------------------------------------------
-# MISCONFIG 5: No CloudTrail
-# Deliberately NOT defined here. The risk is an ABSENCE: no audit log
-# of who did what in the account. Checkov cannot flag code that does
-# not exist; only Prowler, scanning the live account, will catch it.
-# ---------------------------------------------------------------------
+# =====================================================================
+# MISCONFIG 5 FIXED: CloudTrail audit logging
+# FIX: cloudtrail_multi_region_enabled (High) + management events
+# =====================================================================
+
+# Central log bucket: receives CloudTrail logs AND S3 access logs.
+resource "aws_s3_bucket" "logs" {
+  #checkov:skip=CKV_AWS_18:A log bucket logging to itself creates an infinite loop
+  #checkov:skip=CKV_AWS_144:Cross-region replication is a DR control; not justified for a lab
+  #checkov:skip=CKV2_AWS_61:Lifecycle rules are cost management, not a security control here
+  #checkov:skip=CKV2_AWS_62:Event notifications out of scope for this lab
+  #checkov:skip=CKV_AWS_145:SSE-S3 (AES256) is sufficient for the lab
+  bucket        = "cspm-lab-logs-${random_id.suffix.hex}"
+  force_destroy = true
+}
+
+resource "aws_s3_bucket_public_access_block" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  block_public_acls       = true
+  block_public_policy     = true
+  ignore_public_acls      = true
+  restrict_public_buckets = true
+}
+
+resource "aws_s3_bucket_versioning" "logs" {
+  bucket = aws_s3_bucket.logs.id
+  versioning_configuration {
+    status = "Enabled"
+  }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "logs" {
+  bucket = aws_s3_bucket.logs.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm = "AES256"
+    }
+  }
+}
+
+# Least privilege: each AWS service may write ONLY to its own prefix,
+# and only on behalf of THIS trail / THIS bucket (aws:SourceArn).
+resource "aws_s3_bucket_policy" "logs" {
+  bucket = aws_s3_bucket.logs.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "CloudTrailAclCheck"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:GetBucketAcl"
+        Resource  = aws_s3_bucket.logs.arn
+        Condition = { StringEquals = { "aws:SourceArn" = local.trail_arn } }
+      },
+      {
+        Sid       = "CloudTrailWrite"
+        Effect    = "Allow"
+        Principal = { Service = "cloudtrail.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.logs.arn}/AWSLogs/${local.account_id}/*"
+        Condition = {
+          StringEquals = {
+            "s3:x-amz-acl"  = "bucket-owner-full-control"
+            "aws:SourceArn" = local.trail_arn
+          }
+        }
+      },
+      {
+        Sid       = "S3ServerAccessLogs"
+        Effect    = "Allow"
+        Principal = { Service = "logging.s3.amazonaws.com" }
+        Action    = "s3:PutObject"
+        Resource  = "${aws_s3_bucket.logs.arn}/s3-access/*"
+        Condition = {
+          ArnLike      = { "aws:SourceArn" = aws_s3_bucket.public_data.arn }
+          StringEquals = { "aws:SourceAccount" = local.account_id }
+        }
+      },
+      {
+        Sid       = "DenyInsecureTransport"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource  = [aws_s3_bucket.logs.arn, "${aws_s3_bucket.logs.arn}/*"]
+        Condition = { Bool = { "aws:SecureTransport" = "false" } }
+      }
+    ]
+  })
+
+  depends_on = [aws_s3_bucket_public_access_block.logs]
+}
+
+# CloudTrail also streams events to CloudWatch Logs, so the alarms
+# below can react within minutes instead of someone reading S3 files.
+resource "aws_cloudwatch_log_group" "trail" {
+  #checkov:skip=CKV_AWS_158:Log group encrypted by CloudWatch by default; a customer-managed KMS key adds cost
+  name              = "/aws/cloudtrail/cspm-lab"
+  retention_in_days = 365
+}
+
+resource "aws_iam_role" "trail_to_cloudwatch" {
+  name = "cspm-lab-cloudtrail-to-cloudwatch"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect    = "Allow"
+      Principal = { Service = "cloudtrail.amazonaws.com" }
+      Action    = "sts:AssumeRole"
+    }]
+  })
+}
+
+# Only the two actions CloudTrail needs, on only this log group.
+resource "aws_iam_role_policy" "trail_to_cloudwatch" {
+  name = "write-trail-log-group"
+  role = aws_iam_role.trail_to_cloudwatch.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Effect   = "Allow"
+      Action   = ["logs:CreateLogStream", "logs:PutLogEvents"]
+      Resource = "${aws_cloudwatch_log_group.trail.arn}:*"
+    }]
+  })
+}
+
+resource "aws_cloudtrail" "main" {
+  #checkov:skip=CKV_AWS_35:Logs encrypted with SSE-S3; a customer-managed KMS key costs ~$1/month, not justified for the lab
+  #checkov:skip=CKV_AWS_252:Alerting handled by CloudWatch metric filters and alarms instead of per-file SNS notifications
+  name                          = local.trail_name
+  s3_bucket_name                = aws_s3_bucket.logs.id
+  is_multi_region_trail         = true
+  include_global_service_events = true
+  enable_log_file_validation    = true # detects tampering with log files
+
+  cloud_watch_logs_group_arn = "${aws_cloudwatch_log_group.trail.arn}:*"
+  cloud_watch_logs_role_arn  = aws_iam_role.trail_to_cloudwatch.arn
+
+  depends_on = [
+    aws_s3_bucket_policy.logs,
+    aws_iam_role_policy.trail_to_cloudwatch
+  ]
+}
+
+# =====================================================================
+# CIS ALERTING: 15 metric filters + alarms
+# FIX: all 15 cloudwatch_* findings. One map, one loop.
+# Patterns follow the CIS AWS Foundations Benchmark.
+# =====================================================================
+
+# Not KMS-encrypted on purpose: CloudWatch alarms CANNOT publish to a topic
+# encrypted with the AWS-managed SNS key (its key policy can't grant
+# CloudWatch access). Following the scanner here would silently break
+# every alert. A customer-managed key would work but costs ~$1/month.
+resource "aws_sns_topic" "security_alarms" {
+  #checkov:skip=CKV_AWS_26:AWS-managed SNS key blocks CloudWatch alarm delivery; CMK not justified for lab
+  name = "cspm-lab-security-alarms"
+}
+
+resource "aws_sns_topic_subscription" "email" {
+  topic_arn = aws_sns_topic.security_alarms.arn
+  protocol  = "email"
+  endpoint  = var.alert_email
+}
+
+locals {
+  cis_alarms = {
+    "unauthorized-api-calls"   = "{ ($.errorCode = \"*UnauthorizedOperation\") || ($.errorCode = \"AccessDenied*\") }"
+    "console-signin-no-mfa"    = "{ ($.eventName = \"ConsoleLogin\") && ($.additionalEventData.MFAUsed != \"Yes\") }"
+    "root-account-usage"       = "{ $.userIdentity.type = \"Root\" && $.userIdentity.invokedBy NOT EXISTS && $.eventType != \"AwsServiceEvent\" }"
+    "iam-policy-changes"       = "{ ($.eventName = DeleteGroupPolicy) || ($.eventName = DeleteRolePolicy) || ($.eventName = DeleteUserPolicy) || ($.eventName = PutGroupPolicy) || ($.eventName = PutRolePolicy) || ($.eventName = PutUserPolicy) || ($.eventName = CreatePolicy) || ($.eventName = DeletePolicy) || ($.eventName = CreatePolicyVersion) || ($.eventName = DeletePolicyVersion) || ($.eventName = AttachRolePolicy) || ($.eventName = DetachRolePolicy) || ($.eventName = AttachUserPolicy) || ($.eventName = DetachUserPolicy) || ($.eventName = AttachGroupPolicy) || ($.eventName = DetachGroupPolicy) }"
+    "cloudtrail-config-change" = "{ ($.eventName = CreateTrail) || ($.eventName = UpdateTrail) || ($.eventName = DeleteTrail) || ($.eventName = StartLogging) || ($.eventName = StopLogging) }"
+    "console-auth-failures"    = "{ ($.eventName = ConsoleLogin) && ($.errorMessage = \"Failed authentication\") }"
+    "kms-cmk-disable-delete"   = "{ ($.eventSource = kms.amazonaws.com) && (($.eventName = DisableKey) || ($.eventName = ScheduleKeyDeletion)) }"
+    "s3-bucket-policy-changes" = "{ ($.eventSource = s3.amazonaws.com) && (($.eventName = PutBucketAcl) || ($.eventName = PutBucketPolicy) || ($.eventName = PutBucketCors) || ($.eventName = PutBucketLifecycle) || ($.eventName = PutBucketReplication) || ($.eventName = DeleteBucketPolicy) || ($.eventName = DeleteBucketCors) || ($.eventName = DeleteBucketLifecycle) || ($.eventName = DeleteBucketReplication)) }"
+    "aws-config-changes"       = "{ ($.eventSource = config.amazonaws.com) && (($.eventName = StopConfigurationRecorder) || ($.eventName = DeleteDeliveryChannel) || ($.eventName = PutDeliveryChannel) || ($.eventName = PutConfigurationRecorder)) }"
+    "security-group-changes"   = "{ ($.eventName = AuthorizeSecurityGroupIngress) || ($.eventName = AuthorizeSecurityGroupEgress) || ($.eventName = RevokeSecurityGroupIngress) || ($.eventName = RevokeSecurityGroupEgress) || ($.eventName = CreateSecurityGroup) || ($.eventName = DeleteSecurityGroup) }"
+    "nacl-changes"             = "{ ($.eventName = CreateNetworkAcl) || ($.eventName = CreateNetworkAclEntry) || ($.eventName = DeleteNetworkAcl) || ($.eventName = DeleteNetworkAclEntry) || ($.eventName = ReplaceNetworkAclEntry) || ($.eventName = ReplaceNetworkAclAssociation) }"
+    "network-gateway-changes"  = "{ ($.eventName = CreateCustomerGateway) || ($.eventName = DeleteCustomerGateway) || ($.eventName = AttachInternetGateway) || ($.eventName = CreateInternetGateway) || ($.eventName = DeleteInternetGateway) || ($.eventName = DetachInternetGateway) }"
+    "route-table-changes"      = "{ ($.eventSource = ec2.amazonaws.com) && (($.eventName = CreateRoute) || ($.eventName = CreateRouteTable) || ($.eventName = ReplaceRoute) || ($.eventName = ReplaceRouteTableAssociation) || ($.eventName = DeleteRouteTable) || ($.eventName = DeleteRoute) || ($.eventName = DisassociateRouteTable)) }"
+    "vpc-changes"              = "{ ($.eventName = CreateVpc) || ($.eventName = DeleteVpc) || ($.eventName = ModifyVpcAttribute) || ($.eventName = AcceptVpcPeeringConnection) || ($.eventName = CreateVpcPeeringConnection) || ($.eventName = DeleteVpcPeeringConnection) || ($.eventName = RejectVpcPeeringConnection) || ($.eventName = AttachClassicLinkVpc) || ($.eventName = DetachClassicLinkVpc) || ($.eventName = DisableVpcClassicLink) || ($.eventName = EnableVpcClassicLink) }"
+    "organizations-changes"    = "{ ($.eventSource = organizations.amazonaws.com) && (($.eventName = AcceptHandshake) || ($.eventName = AttachPolicy) || ($.eventName = CreateAccount) || ($.eventName = CreateOrganizationalUnit) || ($.eventName = CreatePolicy) || ($.eventName = DeclineHandshake) || ($.eventName = DeleteOrganization) || ($.eventName = DeleteOrganizationalUnit) || ($.eventName = DeletePolicy) || ($.eventName = DetachPolicy) || ($.eventName = DisablePolicyType) || ($.eventName = EnablePolicyType) || ($.eventName = InviteAccountToOrganization) || ($.eventName = LeaveOrganization) || ($.eventName = MoveAccount) || ($.eventName = RemoveAccountFromOrganization) || ($.eventName = UpdatePolicy) || ($.eventName = UpdateOrganizationalUnit)) }"
+  }
+}
+
+resource "aws_cloudwatch_log_metric_filter" "cis" {
+  for_each = local.cis_alarms
+
+  name           = "cis-${each.key}"
+  log_group_name = aws_cloudwatch_log_group.trail.name
+  pattern        = each.value
+
+  metric_transformation {
+    name      = "cis-${each.key}"
+    namespace = "CISBenchmark"
+    value     = "1"
+  }
+}
+
+resource "aws_cloudwatch_metric_alarm" "cis" {
+  for_each = local.cis_alarms
+
+  alarm_name          = "cis-${each.key}"
+  alarm_description   = "CIS AWS Foundations Benchmark alarm: ${each.key}"
+  namespace           = "CISBenchmark"
+  metric_name         = aws_cloudwatch_log_metric_filter.cis[each.key].metric_transformation[0].name
+  statistic           = "Sum"
+  period              = 300
+  evaluation_periods  = 1
+  threshold           = 1
+  comparison_operator = "GreaterThanOrEqualToThreshold"
+  treat_missing_data  = "notBreaching"
+  alarm_actions       = [aws_sns_topic.security_alarms.arn]
+}
